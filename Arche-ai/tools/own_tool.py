@@ -1,7 +1,7 @@
 from typing import Callable, Optional
 
 class OwnTool:
-    def __init__(self, func: Callable, description: str, params: Optional[str] = None):
+    def __init__(self, func: Callable, description: str, **params):
         """
         Initialize the OwnTool with the given parameters.
 
@@ -12,7 +12,8 @@ class OwnTool:
         """
         self.func = func
         self.description = description
-        self.params = params
+        if params is not None:
+            self.params = params
 
     def __call__(self, *args, **kwargs):
         return self.func(*args, **kwargs)
