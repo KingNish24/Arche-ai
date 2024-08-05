@@ -234,7 +234,7 @@ llm_tool - If this tool is use than you have to answer users query in best possi
 """)
 
         try:
-            summary = self.llm.run(f"[QUERY]\n{self.task_to_do}\n\n[TOOLS]\n{results}")
+            summary = self.llm.run(f"[USER'S QUERY]\n{self.task_to_do}\n\n[TOOLS]\n{results}")
             if self.verbose:
                 print("Final Response:")
                 print(summary)
