@@ -229,9 +229,8 @@ llm_tool - If this tool is use than you have to answer users query in best possi
 {self.sample_output}
 
 ##Instructions:
-- If output style is not mentioned clearly just reply in the best possible way.
+- If output style is not mentioned just reply in the best possible way in only text form and not JSON.
 
-***Remember: Your responses should be in text form only and not JSON or any other format.***
 """)
 
         try:
@@ -265,7 +264,7 @@ llm_tool - If this tool is use than you have to answer users query in best possi
             else:
                 raise ValueError(f"Tool '{tool_name}' not found.")
 
-        if tool.params is None:
+        if tool.params is None or tool.params == "" or tool.params == '':
             tool_response = tool()
         else:
             tool_response = tool(query)
