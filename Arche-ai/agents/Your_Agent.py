@@ -264,10 +264,11 @@ llm_tool - If this tool is use than you have to answer users query in best possi
             else:
                 raise ValueError(f"Tool '{tool_name}' not found.")
 
-        if tool.params is None or tool.params == "" or tool.params == '':
-            tool_response = tool()
-        else:
+        # Check if the tool requires parameters
+        if tool.params and query:
             tool_response = tool(query)
+        else:
+            tool_response = tool()
 
         return tool_name, tool_response
 
