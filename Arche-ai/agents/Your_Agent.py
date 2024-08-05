@@ -102,7 +102,7 @@ You are {self.name}, {self.description}.
 ### OUTPUT STYLE:
 {self.sample_output}
 
-***If output style not mentioned, generate in best possible format according to the task assigned.***
+***If output style not mentioned, generate in markdown format.***
 """)
         return self.llm.run(self.task_to_do)
 
@@ -119,7 +119,7 @@ You are an AI assistant designed to generate JSON responses based on provided to
 Your task is to understand the tools, their parameters, and use them appropriately.
 
 Available Tools:
-llm_tool - A default tool that provides AI-generated text responses.
+llm_tool - A default tool that provides AI-generated text responses and it cannot answer real-time queries because of the knowledge cut off of October 2019.
 {self.all_functions}
 
 Instructions:
@@ -127,6 +127,7 @@ Instructions:
 2. Identify the required tool parameters.
 3. Respond with a JSON object containing the tool_name and parameter.
 4. Only provide the JSON response.
+5. You are only trained to give json response and not text or conversation.
 
 JSON Structure:
 {{
@@ -173,6 +174,28 @@ Response:
         }}
     ]
 }}
+
+***How to deal with double parameter tools***
+
+- Remember this is just an example the tools and params varies according to the details given above
+
+Example:
+User: What is the sum of 43675 and 547?
+
+Response:
+{{
+    "func_calling": [
+        {{
+            "tool_name": "add",
+            "parameter": {{
+                "a": 43675,
+                "b": 547
+            }}
+        }}
+    ]
+}}
+
+
 """)
 
         response = self.llm.run(self.task_to_do).strip()
@@ -276,7 +299,10 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
 
         # Check if the tool requires parameters
         if tool.params and query:
-            tool_response = tool(query)
+            if isinstance(query, dict):
+                tool_response = tool(**query)
+            else:
+                tool_response = tool(query)
         else:
             tool_response = tool()
 
@@ -289,30 +315,3 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
         else:
             return self._run_with_tools()
 
-# Example usage
-if __name__ == "__main__":
-    llm = GroqLLM()
-    tools = [
-        OwnTool(
-            func=lambda x: f"Weather in Location: 27°C, Sunny, Wind: 12 km/h W, Humidity: 46% Forecast for tomorrow: 18°C - 30°C, Sunny",
-            description="Get weather information for a location",
-            params={"location": {"type": "string", "description": "The location to get weather for"}}
-        ),
-        OwnTool(
-            func=lambda: "22:09:43",
-            description="Get the current time",
-            params=None
-        )
-    ]
-
-    agent = Agent(
-        llm=llm,
-        tools=tools,
-        name="Example Agent",
-        description="An example agent",
-        verbose=True,
-        task="What is the weather and time in Kolkata?"
-    )
-
-    response = agent.run()
-    print(response)
