@@ -22,14 +22,14 @@ def convert_function(func_name, description, **params):
     }
 
     for param_name, param_info in params.items():
-        
+
         try:
             if "description" not in param_info:
                 param_info["description"] = f"Description for {param_name} is missing. Defaulting to {param_info}"
                 descri = f"{param_info}"
             else:
                 descri = param_info["description"]
-        except: 
+        except:
             descri = f"{str(param_info)}"
 
         try:
@@ -57,7 +57,7 @@ def convert_function(func_name, description, **params):
         except:
             pass
 
-        try: 
+        try:
             if param_info.get("required", False):
                 function_dict["function"]["parameters"]["required"].append(param_name)
         except:
@@ -87,7 +87,7 @@ class Agent:
         self.verbose = verbose
 
         self.llm.__init__(system_prompt=f"You are {self.name}, {self.description}.")
-        
+
         self.all_functions = []
 
         for i in self.tools:
@@ -102,7 +102,7 @@ You are {self.name}, {self.description}.
 ### OUTPUT STYLE:
 {self.sample_output}
 
-***If output style not mentioned, generate in markdown format.***
+***If output style not mentioned, generate in best possible format according to the task assigned.***
 """)
         return self.llm.run(self.task_to_do)
 
@@ -208,7 +208,7 @@ Response:
             if self.verbose:
                 print(f"{Fore.RED}Error:{Style.RESET_ALL} {str(e)}")
 
-        try: 
+        try:
             if self.verbose:
                 print()
                 print(f"{Fore.GREEN}Tool_RESULTS:\n{results}{Style.RESET_ALL}")
@@ -217,28 +217,38 @@ Response:
             pass
 
         # Summarization Prompt
-        self.llm.__init__( system_prompt=f"""
-You are {self.name} an AI agent. You are provided with Output from the tools in JSON format, so your task is to use information
-from them and give the best possible answer to the query. Reply in ChatGPT style and only in text and to the point and use simple words. Do not reply in JSON.
+        self.llm.__init__(system_prompt=f"""
+You are {self.name}, an AI agent. You are provided with output from the tools in JSON format. Your task is to use this information to give the best possible answer to the query. Reply in a natural language style, only in text, and to the point. Do not reply in JSON.
 
 ### TOOLS:
-llm_tool - If this tool is use than you have to answer users query in best possible way.,
+llm_tool - If this tool is used, you must answer the user's query in the best possible way.
 {self.all_functions}
 
 ### OUTPUT STYLE:
 {self.sample_output}
 
 ##Instructions:
-- If output style is not mentioned just reply in the best possible way in only text form and not JSON.
+- If the output style is not mentioned, just reply in the best possible way in only text form and not JSON.
+- You are no longer generating JSON responses. Provide a natural language summary based on the information from the tools.
 
 """)
 
         try:
-            summary = self.llm.run(f"[USER'S QUERY]\n{self.task_to_do}\n\n[TOOLS]\n{results}")
+            summary = self.llm.run(f"[QUERY]\n{self.task_to_do}\n\n[TOOLS]\n{results}")
             if self.verbose:
                 print("Final Response:")
                 print(summary)
                 print()
+
+            # Check if the response is still in JSON format
+            if summary.startswith("{") and summary.endswith("}"):
+                try:
+                    json_summary = json.loads(summary)
+                    if "func_calling" in json_summary:
+                        summary = "It seems there was an issue with the response. Please try again."
+                except json.JSONDecodeError:
+                    pass
+
             return summary
         except Exception as e:
             summary = self.llm.run(f"[QUERY]\n{self.task_to_do}")
@@ -279,25 +289,29 @@ llm_tool - If this tool is use than you have to answer users query in best possi
         else:
             return self._run_with_tools()
 
-
 # Example usage
 if __name__ == "__main__":
     llm = GroqLLM()
     tools = [
         OwnTool(
-            func=lambda x: f"Response from tool: {x}", 
-            description="Example tool", 
-            params={"query": {"type": "string", "description": "The query to process"}}
+            func=lambda x: f"Weather in Location: 27°C, Sunny, Wind: 12 km/h W, Humidity: 46% Forecast for tomorrow: 18°C - 30°C, Sunny",
+            description="Get weather information for a location",
+            params={"location": {"type": "string", "description": "The location to get weather for"}}
+        ),
+        OwnTool(
+            func=lambda: "22:09:43",
+            description="Get the current time",
+            params=None
         )
     ]
 
     agent = Agent(
-        llm=llm, 
-        tools=tools, 
-        name="Example Agent", 
-        description="An example agent", 
+        llm=llm,
+        tools=tools,
+        name="Example Agent",
+        description="An example agent",
         verbose=True,
-        task="What is the weather like in London?"
+        task="What is the weather and time in Kolkata?"
     )
 
     response = agent.run()
