@@ -8,18 +8,19 @@ class GroqLLM:
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
+
     def __init__(self,
-            messages: list[dict[str, str]] = [],
-            model: str = "llama3-70b-8192",
-            temperature: float = 0.0,
-            system_prompt: str|None = None,
-            max_tokens: int = 2048,
-            connectors: list[str] = [],
-            verbose: bool = False,
-            api_key:str|None = None
-            ):
+                 messages: list[dict[str, str]] = [],
+                 model: str = "llama3-70b-8192",
+                 temperature: float = 0.0,
+                 system_prompt: str | None = None,
+                 max_tokens: int = 2048,
+                 connectors: list[str] = [],
+                 verbose: bool = False,
+                 api_key: str | None = None
+                 ):
         self.api_key = api_key if api_key else os.getenv("GROQ_API_KEY")
-        self.gr = Groq(api_key = self.api_key)
+        self.gr = Groq(api_key=self.api_key)
         self.messages = messages
         self.model = model
         self.temperature = temperature
@@ -28,7 +29,8 @@ class GroqLLM:
         self.connectors = connectors
         self.verbose = verbose
         self.client = Groq(api_key=api_key)
-        if self.system_prompt!=None:self.add_message(self.SYSTEM, self.system_prompt)
+        if self.system_prompt is not None:
+            self.add_message(self.SYSTEM, self.system_prompt)
 
     def run(self, prompt: str) -> str:
         self.add_message(self.USER, prompt)
@@ -41,7 +43,7 @@ class GroqLLM:
             stop=None
         )
         self.messages.pop()
-        r=""
+        r = ""
         for chunk in stream:
             if chunk.choices[0].delta.content:
                 r += chunk.choices[0].delta.content
@@ -51,7 +53,8 @@ class GroqLLM:
 
     def add_message(self, role: str, content: str) -> None:
         self.messages.append({"role": role, "content": content})
-    def __getitem__(self, index) -> dict[str, str]|list[dict[str, str]]:
+
+    def __getitem__(self, index) -> dict[str, str] | list[dict[str, str]]:
         """
         Get a message from the list of messages
 
@@ -115,11 +118,23 @@ class GroqLLM:
             self.messages[index] = value
         else:
             raise TypeError("Invalid argument type")
-    
+
+    def reset(self) -> None:
+        """
+        Reset the system prompts and messages
+
+        Returns
+        -------
+        None
+        """
+        self.messages = []
+        self.system_prompt = None
 
 if __name__ == "__main__":
     q = input(">>>")
-    llm = GroqLLM(system_prompt="",verbose=True)
+    llm = GroqLLM(system_prompt="you are helpfull ai", verbose=True)
     llm.add_message(GroqLLM.USER, q)
     print(llm.run(q))
+    print(llm.messages)
+    llm.reset()
     print(llm.messages)
