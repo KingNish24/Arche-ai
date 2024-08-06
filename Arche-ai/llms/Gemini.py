@@ -75,6 +75,17 @@ class Gemini:
             self.messages[index] = value
         else:
             raise TypeError("Invalid argument type")
+    
+    def reset(self) -> None:
+        """
+        Reset the system prompts and messages
+
+        Returns
+        -------
+        None
+        """
+        self.messages = []
+        self.system_prompt = None
 
 if __name__ == "__main__":
     q = input(">>> ")
