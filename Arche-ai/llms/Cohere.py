@@ -182,6 +182,17 @@ class Cohere:
             self.messages[index] = value
         else:
             raise TypeError("Invalid argument type")
+        
+    def reset(self) -> None:
+        """
+        Reset the system prompts and messages
+
+        Returns
+        -------
+        None
+        """
+        self.messages = []
+        self.system_prompt = None
 
 if __name__ == "__main__":
     llm = Cohere(api_key="FIpCfF2pfLI8sp4pBnHkOfXjmas71bOpZTijLB6D")
