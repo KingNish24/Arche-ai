@@ -1,8 +1,8 @@
 from llms import GroqLLM
 from tools import OwnTool
-from typing import Type, List, Optional
+from typing import Type, List, Optional, Dict, Any
 import json
-from colorama import Fore, Back, Style
+from colorama import Fore, Style
 import concurrent.futures
 
 def convert_function(func_name, description, **params):
@@ -22,7 +22,6 @@ def convert_function(func_name, description, **params):
     }
 
     for param_name, param_info in params.items():
-
         try:
             if "description" not in param_info:
                 param_info["description"] = f"Description for {param_name} is missing. Defaulting to {param_info}"
@@ -34,7 +33,6 @@ def convert_function(func_name, description, **params):
 
         try:
             param_type = param_info.get("type", "string")
-
             valid_types = ("string", "number", "boolean", "enum", "array", "object", "integer")
             if param_type not in valid_types:
                 print(f"Warning: Invalid type '{param_type}' for '{param_name}'. Defaulting to 'string'.")
@@ -51,6 +49,7 @@ def convert_function(func_name, description, **params):
             if "options" not in param_info:
                 raise ValueError(f"Parameter '{param_name}' of type 'enum' requires an 'options' list.")
             param_properties["enum"] = param_info["options"]
+
         try:
             if "default" in param_info:
                 param_properties["default"] = param_info["default"]
@@ -77,6 +76,7 @@ class Agent:
         sample_output: str = "Concise and informative text.",
         task: str = "Ask me a question or give me a task.",
         verbose: bool = False,
+        memory: bool = True,
     ) -> None:
         self.llm = llm
         self.tools = tools
@@ -85,26 +85,23 @@ class Agent:
         self.sample_output = sample_output
         self.task_to_do = task
         self.verbose = verbose
+        self.memory = memory
 
-        self.llm.__init__(system_prompt=f"You are {self.name}, {self.description}.")
+        self.all_functions = [convert_function(tool.func.__name__, tool.description, **tool.params) for tool in self.tools]
 
-        self.all_functions = []
-
-        for i in self.tools:
-            x = convert_function(func_name=i.func.__name__, description=i.description, **i.params)
-            self.all_functions.append(x)
+    def _initialize_llm(self, system_prompt: str) -> None:
+        self.llm.__init__(system_prompt=system_prompt)
 
     def _run_no_tool(self) -> str:
-        """Handles tasks without any tools."""
-        self.llm.__init__(system_prompt=f"""
+        self._initialize_llm(f"""
 You are {self.name}, {self.description}.
-
 ### OUTPUT STYLE:
 {self.sample_output}
-
 ***If output style not mentioned, generate in markdown format.***
 """)
-        return self.llm.run(self.task_to_do)
+        result = self.llm.run(self.task_to_do)
+        self._finalize_response(result)
+        return result
 
     def _run_with_tools(self) -> str:
         """Handles tasks that require using tools."""
@@ -113,10 +110,10 @@ You are {self.name}, {self.description}.
             for tool in self.tools
         ])
 
-        self.llm.__init__(system_prompt=f"""
+        self._initialize_llm(f"""
 You are an AI assistant designed to generate JSON responses based on provided tools.
 
-Your task is to understand the tools, their parameters, and use them appropriately.
+Your task is to understand the tools, their parameters, and use them appropriately and wisely.
 
 Available Tools:
 llm_tool - A default tool that provides AI-generated text responses and it cannot answer real-time queries because of the knowledge cut off of October 2019.
@@ -126,15 +123,15 @@ Instructions:
 1. Read the task carefully.
 2. Identify the required tool parameters.
 3. Respond with a JSON object containing the tool_name and parameter.
-4. Only provide the JSON response.
-5. You are only trained to give json response and not text or conversation.
+4. Only provide the JSON response. Do not include any text outside of the JSON structure.
+5. You are only trained to give JSON response and not text or conversation.
 
 JSON Structure:
 {{
     "func_calling": [
         {{
             "tool_name": "<tool_name>",
-            "parameter": "<tool_params>"
+            "parameter": {{<param_name> : "<param_value>"}}
         }}
     ]
 }}
@@ -146,7 +143,7 @@ Response:
     "func_calling": [
         {{
             "tool_name": "weather_tool",
-            "parameter": "New York"
+            "parameter": {{"query" : "New York"}}
         }}
     ]
 }}
@@ -161,10 +158,24 @@ For tools with no parameters:
     ]
 }}
 
-Conversation with llm_tool:
+***How to handle double parameter tools***
 
 Example:
-User: Who are you?
+Task: Get the sum of 48 and 12
+Response:
+{{
+    "func_calling": [
+        {{
+            "tool_name": "add",
+            "parameter": {{"a": 48, "b": 12}}
+        }}
+    ]
+}}
+
+## always use exact same structure while calling double param tools, `make sure this is just an example showcasing the structure to call while the tools and params used here varies according to provided tools and params above.`
+
+Example with llm_tool:
+Task: Who are you?
 Response:
 {{
     "func_calling": [
@@ -175,27 +186,7 @@ Response:
     ]
 }}
 
-***How to deal with double parameter tools***
-
-- Remember this is just an example the tools and params varies according to the details given above
-
-Example:
-User: What is the sum of 43675 and 547?
-
-Response:
-{{
-    "func_calling": [
-        {{
-            "tool_name": "add",
-            "parameter": {{
-                "a": 43675,
-                "b": 547
-            }}
-        }}
-    ]
-}}
-
-
+***Remember these are just examples, the tools and parameters vary according to the details given above.***
 """)
 
         response = self.llm.run(self.task_to_do).strip()
@@ -203,9 +194,9 @@ Response:
             print(f"{Fore.YELLOW}Raw LLM Response:{Style.RESET_ALL} {response}")
 
         try:
-            if response.startswith("```json") and response.endswith("```"):
-                response = response[7:-3].strip()
-            action = json.loads(response)
+            # Ensure only JSON part is processed
+            response = response.split("```")[1] if "```" in response else response
+            action = json.loads(response.strip())
 
             results = {}
             with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -239,8 +230,10 @@ Response:
         except:
             pass
 
+        self.llm.reset()
+
         # Summarization Prompt
-        self.llm.__init__(system_prompt=f"""
+        self._initialize_llm(f"""
 You are {self.name}, an AI agent. You are provided with output from the tools in JSON format. Your task is to use this information to give the best possible answer to the query. Reply in a natural language style, only in text, and to the point. Do not reply in JSON.
 
 ### TOOLS:
@@ -250,10 +243,9 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
 ### OUTPUT STYLE:
 {self.sample_output}
 
-##Instructions:
+## Instructions:
 - If the output style is not mentioned, just reply in the best possible way in only text form and not JSON.
 - You are no longer generating JSON responses. Provide a natural language summary based on the information from the tools.
-
 """)
 
         try:
@@ -262,6 +254,9 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
                 print("Final Response:")
                 print(summary)
                 print()
+
+            if self.memory != True:
+                self.llm.reset()
 
             # Check if the response is still in JSON format
             if summary.startswith("{") and summary.endswith("}"):
@@ -279,6 +274,10 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
                 print("Final Response:")
                 print(summary)
                 print()
+
+            if self.memory != True:
+                self.llm.reset()
+
             return summary
 
     def _call_tool(self, call):
@@ -299,19 +298,81 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
 
         # Check if the tool requires parameters
         if tool.params and query:
-            if isinstance(query, dict):
-                tool_response = tool(**query)
-            else:
-                tool_response = tool(query)
+            if "params" in query:
+                query = query["params"]
+            query = json.loads(query) if isinstance(query, str) else query
+            tool_response = tool.func(**query) if isinstance(query, dict) else tool.func(query)
         else:
-            tool_response = tool()
+            tool_response = tool.func()
 
         return tool_name, tool_response
+
+    def _generate_summary(self, results: Dict[str, str]) -> str:
+        self._initialize_llm(f"""
+You are {self.name}, an AI agent. You are provided with output from the tools in JSON format. Your task is to use this information to give the best possible answer to the query. Reply in a natural language style, only in text, and to the point. Do not reply in JSON.
+
+### TOOLS:
+llm_tool - If this tool is used, you must answer the user's query in the best possible way.
+{self.all_functions}
+
+### OUTPUT STYLE:
+{self.sample_output}
+
+## Instructions:
+- If the output style is not mentioned, just reply in the best possible way in only text form and not JSON.
+- You are no longer generating JSON responses. Provide a natural language summary based on the information from the tools.
+""")
+        try:
+            summary = self.llm.run(f"[QUERY]\n{self.task_to_do}\n\n[TOOLS]\n{results}")
+            if self.verbose:
+                print("Final Response:")
+                print(summary)
+            return summary
+        except Exception as e:
+            if self.verbose:
+                print(f"{Fore.RED}Error generating summary:{Style.RESET_ALL} {str(e)}")
+            return "There was an error generating the summary."
+
+    def _finalize_response(self, response: str) -> None:
+        if self.memory:
+            self.llm.add_message("user", self.task_to_do)
+            self.llm.add_message("assistant", response)
+        else:
+            self.llm.reset()
 
     def run(self) -> str:
         """Main execution logic of the agent."""
         if not self.tools:
             return self._run_no_tool()
-        else:
-            return self._run_with_tools()
+        return self._run_with_tools()
 
+# Example usage
+if __name__ == "__main__":
+    llm = GroqLLM()
+    tools = [
+        OwnTool(
+            func=lambda location, date: f"Weather in {location} on {date}: 27°C, Sunny, Wind: 12 km/h W, Humidity: 46% Forecast for tomorrow: 18°C - 30°C, Sunny",
+            description="Get weather information for a location on a specific date",
+            params={
+                "location": {"type": "string", "description": "The location to get weather for"},
+                "date": {"type": "string", "description": "The date to get weather for"}
+            }
+        ),
+        OwnTool(
+            func=lambda: "23:18:03",
+            description="Get the current time",
+            params=None
+        )
+    ]
+
+    agent = Agent(
+        llm=llm,
+        tools=tools,
+        name="Example Agent",
+        description="An example agent",
+        verbose=True,
+        task="What is the weather and time in Kolkata on 2023-10-01?"
+    )
+
+    response = agent.run()
+    print(response)
