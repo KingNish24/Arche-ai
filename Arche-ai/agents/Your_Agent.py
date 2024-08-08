@@ -297,6 +297,13 @@ Response:
             else:
                 raise ValueError(f"Tool '{tool_name}' not found.")
 
+        # Flatten the parameters if they are nested within any dictionary
+        if isinstance(query, dict):
+            # Extract the first nested dictionary if it exists
+            nested_keys = [key for key in query if isinstance(query[key], dict)]
+            if nested_keys:
+                query = query[nested_keys[0]]
+
         # Check if the tool requires parameters
         if tool.params and isinstance(query, dict):
             try:
