@@ -194,7 +194,7 @@ class Cohere:
         self.__init__()
 
 if __name__ == "__main__":
-    llm = Cohere(api_key="FIpCfF2pfLI8sp4pBnHkOfXjmas71bOpZTijLB6D")
+    llm = Cohere()
     llm.add_message("User", "Hello, how are you?")
     llm.add_message("Chatbot", "I'm doing well, thank you!")
     print(llm.run("write python code to make snake game"))
