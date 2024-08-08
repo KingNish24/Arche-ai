@@ -28,7 +28,7 @@ def greet(name: str) -> str:
 greet_tool = OwnTool(
     func=greet,
     description="A tool that greets a user.",
-    params={"name": {"type": "string", "description": "The name of the user.", "required": True}}
+    params={"name": {"type": "string", "description": "The name of the user."}}
 )
 
 agent = Agent(
