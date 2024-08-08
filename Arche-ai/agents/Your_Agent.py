@@ -1,9 +1,10 @@
-from llms import GroqLLM
+from llms import GroqLLM, Gemini, Cohere
 from tools import OwnTool
 from typing import Type, List, Optional, Dict, Any
 import json
 from colorama import Fore, Style
 import concurrent.futures
+import re
 
 def convert_function(func_name, description, **params):
     """Converts function info to a JSON function schema."""
@@ -87,10 +88,23 @@ class Agent:
         self.verbose = verbose
         self.memory = memory
 
-        self.all_functions = [convert_function(tool.func.__name__, tool.description, **tool.params) for tool in self.tools]
+        self.all_functions = [
+    convert_function(tool.func.__name__, tool.description, **tool.params) for tool in self.tools
+] + [convert_function("llm_tool", "A default tool that provides AI-generated text responses and it cannot answer real-time queries because of the knowledge cut off of October 2019.")]
+
 
     def _initialize_llm(self, system_prompt: str) -> None:
         self.llm.__init__(system_prompt=system_prompt)
+
+    def add_tool(self, tool: OwnTool):
+        """Add a tool to the agent dynamically."""
+        self.tools.append(tool)
+        self.all_functions.append(convert_function(tool.func.__name__, tool.description, **tool.params))
+
+    def remove_tool(self, tool_name: str):
+        """Remove a tool from the agent dynamically."""
+        self.tools = [tool for tool in self.tools if tool.func.__name__ != tool_name]
+        self.all_functions = [func for func in self.all_functions if func['function']['name'] != tool_name]
 
     def _run_no_tool(self) -> str:
         self._initialize_llm(f"""
@@ -113,10 +127,12 @@ You are {self.name}, {self.description}.
         self._initialize_llm(f"""
 You are an AI assistant designed to generate JSON responses based on provided tools.
 
-Your task is to understand the tools, their parameters, and use them appropriately and wisely.
+Before responding, ask yourself:
+1. Does the task require real-time or specific data retrieval (e.g., weather, time)?
+2. If yes, identify the appropriate tool and its required parameters.
+3. If no, answer the task directly without tool usage.
 
 Available Tools:
-llm_tool - A default tool that provides AI-generated text responses and it cannot answer real-time queries because of the knowledge cut off of October 2019.
 {self.all_functions}
 
 Instructions:
@@ -126,12 +142,23 @@ Instructions:
 4. Only provide the JSON response. Do not include any text outside of the JSON structure.
 5. You are only trained to give JSON response and not text or conversation.
 
-JSON Structure:
+JSON Structure with tool params:
 {{
     "func_calling": [
         {{
             "tool_name": "<tool_name>",
             "parameter": {{<param_name> : "<param_value>"}}
+        }}
+    ]
+}}
+
+JSON Structure for calling tools without tool params:
+
+{{
+    "func_calling": [
+        {{
+            "tool_name": "<tool_name>",
+            "parameter": {{""}}
         }}
     ]
 }}
@@ -190,95 +217,69 @@ Response:
 """)
 
         response = self.llm.run(self.task_to_do).strip()
+
         if self.verbose:
             print(f"{Fore.YELLOW}Raw LLM Response:{Style.RESET_ALL} {response}")
 
+        # Extract only the JSON part from the response
+        json_part = self._extract_json(response)
+
+        if json_part:
+            try:
+                # Ensure only JSON part is processed
+                action = json.loads(json_part.strip())
+
+                results = {}
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future_to_tool = {
+                        executor.submit(self._call_tool, call): call for call in action.get("func_calling", [])
+                    }
+                    for future in concurrent.futures.as_completed(future_to_tool):
+                        call = future_to_tool[future]
+                        try:
+                            tool_name, tool_response = future.result()
+                            results[tool_name] = tool_response
+                            if self.verbose:
+                                print(f"{Fore.GREEN}Tool Response ({tool_name}):{Style.RESET_ALL} {tool_response}")
+                        except Exception as e:
+                            if self.verbose:
+                                print(f"{Fore.RED}Error calling tool {call['tool_name']}:{Style.RESET_ALL} {str(e)}")
+                            results[call['tool_name']] = f"Failed to get info: {str(e)}."
+
+            except json.JSONDecodeError as e:
+                if self.verbose:
+                    print(f"{Fore.RED}JSON Decode Error:{Style.RESET_ALL} {str(e)}")
+            except Exception as e:
+                if self.verbose:
+                    print(f"{Fore.RED}Error:{Style.RESET_ALL} {str(e)}")
+
+            try:
+                if self.verbose:
+                    print()
+                    print(f"{Fore.GREEN}Tool_RESULTS:\n{results}{Style.RESET_ALL}")
+                    print()
+            except:
+                pass
+
+            self.llm.reset()
+
+            return self._generate_summary(results)
+
+        else:
+            # If no tools were needed, the response should be a direct answer.
+            self._finalize_response(response)
+            return response
+
+    def _extract_json(self, response: str) -> Optional[str]:
+        """Enhanced JSON extraction with better pattern matching."""
         try:
-            # Ensure only JSON part is processed
-            response = response.split("```")[1] if "```" in response else response
-            action = json.loads(response.strip())
-
-            results = {}
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future_to_tool = {
-                    executor.submit(self._call_tool, call): call for call in action.get("func_calling", [])
-                }
-                for future in concurrent.futures.as_completed(future_to_tool):
-                    call = future_to_tool[future]
-                    try:
-                        tool_name, tool_response = future.result()
-                        results[tool_name] = tool_response
-                        if self.verbose:
-                            print(f"{Fore.GREEN}Tool Response ({tool_name}):{Style.RESET_ALL} {tool_response}")
-                    except Exception as e:
-                        if self.verbose:
-                            print(f"{Fore.RED}Error calling tool {call['tool_name']}:{Style.RESET_ALL} {str(e)}")
-                        results[call['tool_name']] = f"Failed to get info: {str(e)}."
-
-        except json.JSONDecodeError as e:
+            start = response.index('{')
+            end = response.rindex('}') + 1
+            return response[start:end]
+        except ValueError:
             if self.verbose:
-                print(f"{Fore.RED}JSON Decode Error:{Style.RESET_ALL} {str(e)}")
-        except Exception as e:
-            if self.verbose:
-                print(f"{Fore.RED}Error:{Style.RESET_ALL} {str(e)}")
-
-        try:
-            if self.verbose:
-                print()
-                print(f"{Fore.GREEN}Tool_RESULTS:\n{results}{Style.RESET_ALL}")
-                print()
-        except:
-            pass
-
-        self.llm.reset()
-
-        # Summarization Prompt
-        self._initialize_llm(f"""
-You are {self.name}, an AI agent. You are provided with output from the tools in JSON format. Your task is to use this information to give the best possible answer to the query. Reply in a natural language style, only in text, and to the point. Do not reply in JSON.
-
-### TOOLS:
-llm_tool - If this tool is used, you must answer the user's query in the best possible way.
-{self.all_functions}
-
-### OUTPUT STYLE:
-{self.sample_output}
-
-## Instructions:
-- If the output style is not mentioned, just reply in the best possible way in only text form and not JSON.
-- You are no longer generating JSON responses. Provide a natural language summary based on the information from the tools.
-""")
-
-        try:
-            summary = self.llm.run(f"[QUERY]\n{self.task_to_do}\n\n[TOOLS]\n{results}")
-            if self.verbose:
-                print("Final Response:")
-                print(summary)
-                print()
-
-            if self.memory != True:
-                self.llm.reset()
-
-            # Check if the response is still in JSON format
-            if summary.startswith("{") and summary.endswith("}"):
-                try:
-                    json_summary = json.loads(summary)
-                    if "func_calling" in json_summary:
-                        summary = "It seems there was an issue with the response. Please try again."
-                except json.JSONDecodeError:
-                    pass
-
-            return summary
-        except Exception as e:
-            summary = self.llm.run(f"[QUERY]\n{self.task_to_do}")
-            if self.verbose:
-                print("Final Response:")
-                print(summary)
-                print()
-
-            if self.memory != True:
-                self.llm.reset()
-
-            return summary
+                print("No valid JSON structure found.")
+            return None
 
     def _call_tool(self, call):
         tool_name = call["tool_name"]
@@ -297,17 +298,23 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
                 raise ValueError(f"Tool '{tool_name}' not found.")
 
         # Check if the tool requires parameters
-        if tool.params and query:
-            if "params" in query:
-                query = query["params"]
-            query = json.loads(query) if isinstance(query, str) else query
-            tool_response = tool.func(**query) if isinstance(query, dict) else tool.func(query)
+        if tool.params and isinstance(query, dict):
+            try:
+                # Pass the parameters as keyword arguments
+                tool_response = tool.func(**query)
+            except TypeError as e:
+                if 'unexpected keyword argument' in str(e) or 'missing 1 required positional argument' in str(e):
+                    # Handle case where parameters need to be passed positionally
+                    tool_response = tool.func(*query.values())
+                else:
+                    raise e
         else:
             tool_response = tool.func()
 
         return tool_name, tool_response
 
     def _generate_summary(self, results: Dict[str, str]) -> str:
+        self.llm.reset()
         self._initialize_llm(f"""
 You are {self.name}, an AI agent. You are provided with output from the tools in JSON format. Your task is to use this information to give the best possible answer to the query. Reply in a natural language style, only in text, and to the point. Do not reply in JSON.
 
@@ -334,13 +341,20 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
             return "There was an error generating the summary."
 
     def _finalize_response(self, response: str) -> None:
+        self.llm.reset()
         if self.memory:
             self.llm.add_message("user", self.task_to_do)
-            self.llm.add_message("assistant", response)
+            if isinstance(self.llm, Gemini):
+                self.llm.add_message("model", response)
+            elif isinstance(self.llm, Cohere):
+                self.llm.add_message("Chatbot", response)
+            else:
+                self.llm.add_message("assistant", response)
         else:
             self.llm.reset()
 
     def run(self) -> str:
+        self.llm.reset()
         """Main execution logic of the agent."""
         if not self.tools:
             return self._run_no_tool()
