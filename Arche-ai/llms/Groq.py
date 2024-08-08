@@ -127,8 +127,7 @@ class GroqLLM:
         -------
         None
         """
-        self.messages = []
-        self.system_prompt = None
+        self.__init__()
 
 if __name__ == "__main__":
     q = input(">>>")
