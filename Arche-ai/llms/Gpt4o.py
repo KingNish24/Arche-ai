@@ -235,6 +235,8 @@ class Gpt4o:
         """
         self.__init__(system_prompt=None,
                       messages=[])
+        self.messages = []
+        self.system_prompt = None
 
 def FileToBase64(file_path:str):
     """
