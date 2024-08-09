@@ -77,21 +77,19 @@ class Agent:
         sample_output: str = "Concise and informative text.",
         task: str = "Ask me a question or give me a task.",
         verbose: bool = False,
-        memory: bool = True,
     ) -> None:
         self.llm = llm
         self.tools = tools
         self.name = name
         self.description = description
         self.sample_output = sample_output
-        self.task_to_do = task
+        self.task = task
         self.verbose = verbose
-        self.memory = memory
+        self.memory = True
 
         self.all_functions = [
-    convert_function(tool.func.__name__, tool.description, **tool.params) for tool in self.tools
-] + [convert_function("llm_tool", "A default tool that provides AI-generated text responses and it cannot answer real-time queries because of the knowledge cut off of October 2019.")]
-
+            convert_function(tool.func.__name__, tool.description, **tool.params) for tool in self.tools
+        ] + [convert_function("llm_tool", "A default tool that provides AI-generated text responses and it cannot answer real-time queries because of the knowledge cut off of October 2019.")]
 
     def _initialize_llm(self, system_prompt: str) -> None:
         self.llm.__init__(system_prompt=system_prompt)
@@ -113,7 +111,7 @@ You are {self.name}, {self.description}.
 {self.sample_output}
 ***If output style not mentioned, generate in markdown format.***
 """)
-        result = self.llm.run(self.task_to_do)
+        result = self.llm.run(self.task)
         self._finalize_response(result)
         return result
 
@@ -216,7 +214,7 @@ Response:
 ***Remember these are just examples, the tools and parameters vary according to the details given above.***
 """)
 
-        response = self.llm.run(self.task_to_do).strip()
+        response = self.llm.run(self.task).strip()
 
         if self.verbose:
             print(f"{Fore.YELLOW}Raw LLM Response:{Style.RESET_ALL} {response}")
@@ -224,12 +222,12 @@ Response:
         # Extract only the JSON part from the response
         json_part = self._extract_json(response)
 
+        results = {}
         if json_part:
             try:
                 # Ensure only JSON part is processed
                 action = json.loads(json_part.strip())
 
-                results = {}
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future_to_tool = {
                         executor.submit(self._call_tool, call): call for call in action.get("func_calling", [])
@@ -249,9 +247,11 @@ Response:
             except json.JSONDecodeError as e:
                 if self.verbose:
                     print(f"{Fore.RED}JSON Decode Error:{Style.RESET_ALL} {str(e)}")
+                results = {"error": f"Failed to decode JSON: {str(e)}"}
             except Exception as e:
                 if self.verbose:
                     print(f"{Fore.RED}Error:{Style.RESET_ALL} {str(e)}")
+                results = {"error": f"An error occurred: {str(e)}"}
 
             try:
                 if self.verbose:
@@ -337,7 +337,7 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
 - You are no longer generating JSON responses. Provide a natural language summary based on the information from the tools.
 """)
         try:
-            summary = self.llm.run(f"[QUERY]\n{self.task_to_do}\n\n[TOOLS]\n{results}")
+            summary = self.llm.run(f"[QUERY]\n{self.task}\n\n[TOOLS]\n{results}")
             if self.verbose:
                 print("Final Response:")
                 print(summary)
@@ -350,7 +350,7 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
     def _finalize_response(self, response: str) -> None:
         self.llm.reset()
         if self.memory:
-            self.llm.add_message("user", self.task_to_do)
+            self.llm.add_message("user", self.task)
             if isinstance(self.llm, Gemini):
                 self.llm.add_message("model", response)
             elif isinstance(self.llm, Cohere):
