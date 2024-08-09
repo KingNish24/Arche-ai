@@ -346,7 +346,7 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
 - You are no longer generating JSON responses. Provide a natural language summary based on the information from the tools.
 """)
         try:
-            summary = self.llm.run(f"[QUERY]\n{self.task}\n\n[TOOLS]\n{results}")
+            summary = summarizer_llm.llm.run(f"[QUERY]\n{self.task}\n\n[TOOLS]\n{results}")
             if self.verbose:
                 print("Final Response:")
                 print(summary)
