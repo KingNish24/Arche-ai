@@ -85,7 +85,6 @@ class Agent:
         self.sample_output = sample_output
         self.task = task
         self.verbose = verbose
-        self.memory = True
 
         self.all_functions = [
             convert_function(tool.func.__name__, tool.description, **tool.params) for tool in self.tools
@@ -112,7 +111,7 @@ You are {self.name}, {self.description}.
 ***If output style not mentioned, generate in markdown format.***
 """)
         result = self.llm.run(self.task)
-        self._finalize_response(result)
+        self.llm.reset()
         return result
 
     def _run_with_tools(self) -> str:
@@ -219,6 +218,9 @@ Response:
         if self.verbose:
             print(f"{Fore.YELLOW}Raw LLM Response:{Style.RESET_ALL} {response}")
 
+        # Preprocess the response to fix common JSON errors
+        response = self._preprocess_response(response)
+
         # Extract only the JSON part from the response
         json_part = self._extract_json(response)
 
@@ -267,8 +269,14 @@ Response:
 
         else:
             # If no tools were needed, the response should be a direct answer.
-            self._finalize_response(response)
+            self.llm.reset()
             return response
+
+    def _preprocess_response(self, response: str) -> str:
+        """Preprocess the response to fix common JSON errors."""
+        # Fix missing colons in parameter sections
+        response = re.sub(r'("parameter":\s*)({)([^}]*)(})', r'\1{\2:\3\4}', response)
+        return response
 
     def _extract_json(self, response: str) -> Optional[str]:
         """Enhanced JSON extraction with better pattern matching."""
@@ -349,16 +357,13 @@ llm_tool - If this tool is used, you must answer the user's query in the best po
 
     def _finalize_response(self, response: str) -> None:
         self.llm.reset()
-        if self.memory:
-            self.llm.add_message("user", self.task)
-            if isinstance(self.llm, Gemini):
-                self.llm.add_message("model", response)
-            elif isinstance(self.llm, Cohere):
-                self.llm.add_message("Chatbot", response)
-            else:
-                self.llm.add_message("assistant", response)
+        self.llm.add_message("user", self.task)
+        if isinstance(self.llm, Gemini):
+            self.llm.add_message("model", response)
+        elif isinstance(self.llm, Cohere):
+            self.llm.add_message("Chatbot", response)
         else:
-            self.llm.reset()
+            self.llm.add_message("assistant", response)
 
     def run(self) -> str:
         self.llm.reset()
