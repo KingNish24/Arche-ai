@@ -193,6 +193,8 @@ class Cohere:
         """
         self.__init__(system_prompt=None,
                       messages=[])
+        self.messages = []
+        self.system_prompt = None
 
 if __name__ == "__main__":
     llm = Cohere()
